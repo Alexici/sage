@@ -1,0 +1,59 @@
+# Private
+/prompts/
+/docs/
+/assets/
+/config/
+/build/
+/tests/
+/bench/
+/data/
+/workspace/
+
+# Python environments & caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+venv-*/
+*.egg-info/
+dist/
+
+# Models, audio, and local databases
+*.gguf
+*.safetensors
+*.onnx
+*.bin
+*.pt
+*.pth
+*.tflite
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets & machine configs
+.env
+.env.*
+*.key
+*.pem
+devices.json
+
+# Flutter / Dart
+app/build/
+app/.dart_tool/
+app/.flutter-plugins*
+app/.idea/
+app/test/
+app/linux/flutter/ephemeral/
+app/windows/flutter/ephemeral/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store

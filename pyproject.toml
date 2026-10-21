@@ -1,0 +1,23 @@
+[project]
+name = "sage"
+version = "0.1.0"
+description = "Sage: a local voice assistant"
+requires-python = ">=3.12"
+# Chatterbox is installed from GitHub master (see the plan); it is not on PyPI in the needed version.
+dependencies = ["requests", "numpy", "sounddevice", "soundfile", "ddgs"]
+
+[project.optional-dependencies]
+stt = ["faster-whisper"]
+# Pocket TTS needs numpy>=2 but Chatterbox pins numpy<2 on Python 3.12: install it in a SEPARATE venv.
+pocket = ["pocket-tts"]
+# The network server (FastAPI + WebSocket) for the Flutter app: python -m sage.server serve
+server = ["fastapi", "uvicorn[standard]"]
+dev = ["pytest", "ruff", "httpx", "fastapi", "uvicorn[standard]"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "tests"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+src = ["src"]

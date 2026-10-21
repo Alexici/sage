@@ -1,0 +1,51 @@
+{
+  "description": "Malformed client messages get error code bad_request; the connection stays open.",
+  "client_sent": [
+    {
+      "type": "nope"
+    },
+    {
+      "type": "send",
+      "text": "   "
+    }
+  ],
+  "server": [
+    {
+      "type": "hello",
+      "protocol": 1,
+      "name": "Sage",
+      "user": "Alex",
+      "device": "pc",
+      "local": true,
+      "busy": false,
+      "state": "idle",
+      "tools": [
+        "get_time",
+        "web_search",
+        "list_files",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "delete_file"
+      ],
+      "history": [],
+      "pending_confirm": null,
+      "seq": 1,
+      "ts": 1700000000.1
+    },
+    {
+      "type": "error",
+      "message": "unknown message type 'nope'",
+      "code": "bad_request",
+      "seq": 2,
+      "ts": 1700000000.2
+    },
+    {
+      "type": "error",
+      "message": "empty message",
+      "code": "bad_request",
+      "seq": 3,
+      "ts": 1700000000.3
+    }
+  ]
+}

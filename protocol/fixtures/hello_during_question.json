@@ -1,0 +1,39 @@
+{
+  "description": "A client connects while a confirmation is open: hello.pending_confirm is set.",
+  "client_sent": [],
+  "server": [
+    {
+      "type": "hello",
+      "protocol": 1,
+      "name": "Sage",
+      "user": "Alex",
+      "device": "pc",
+      "local": true,
+      "busy": true,
+      "state": "awaiting_confirm",
+      "tools": [
+        "get_time",
+        "web_search",
+        "list_files",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "delete_file"
+      ],
+      "history": [],
+      "pending_confirm": {
+        "id": "c0nf1rm1",
+        "tool": "write_file",
+        "summary": "Create notes.txt (5 characters). Nothing real happens in the demo.",
+        "arguments": {
+          "path": "notes.txt",
+          "content": "hello"
+        },
+        "timeout": 30.0,
+        "timeout_left": 29.5
+      },
+      "seq": 1,
+      "ts": 1700000000.1
+    }
+  ]
+}

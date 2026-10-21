@@ -1,0 +1,61 @@
+{
+  "description": "The client sends cancel before any text arrives: stopped, then idle.",
+  "client_sent": [
+    {
+      "type": "send",
+      "text": "slow"
+    },
+    {
+      "type": "cancel"
+    }
+  ],
+  "server": [
+    {
+      "type": "hello",
+      "protocol": 1,
+      "name": "Sage",
+      "user": "Alex",
+      "device": "pc",
+      "local": true,
+      "busy": false,
+      "state": "idle",
+      "tools": [
+        "get_time",
+        "web_search",
+        "list_files",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "delete_file"
+      ],
+      "history": [],
+      "pending_confirm": null,
+      "seq": 1,
+      "ts": 1700000000.1
+    },
+    {
+      "type": "user",
+      "ts": 1700000000.2,
+      "text": "slow",
+      "source": "text",
+      "seq": 2
+    },
+    {
+      "type": "state",
+      "value": "thinking",
+      "seq": 3,
+      "ts": 1700000000.3
+    },
+    {
+      "type": "stopped",
+      "ts": 1700000000.4,
+      "seq": 4
+    },
+    {
+      "type": "state",
+      "value": "idle",
+      "seq": 5,
+      "ts": 1700000000.5
+    }
+  ]
+}

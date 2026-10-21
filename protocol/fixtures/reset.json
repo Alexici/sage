@@ -1,0 +1,187 @@
+{
+  "description": "The conversation is cleared.",
+  "client_sent": [
+    {
+      "type": "send",
+      "text": "hello"
+    },
+    {
+      "type": "reset"
+    }
+  ],
+  "server": [
+    {
+      "type": "hello",
+      "protocol": 1,
+      "name": "Sage",
+      "user": "Alex",
+      "device": "pc",
+      "local": true,
+      "busy": false,
+      "state": "idle",
+      "tools": [
+        "get_time",
+        "web_search",
+        "list_files",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "delete_file"
+      ],
+      "history": [],
+      "pending_confirm": null,
+      "seq": 1,
+      "ts": 1700000000.1
+    },
+    {
+      "type": "user",
+      "ts": 1700000000.2,
+      "text": "hello",
+      "source": "text",
+      "seq": 2
+    },
+    {
+      "type": "state",
+      "value": "thinking",
+      "seq": 3,
+      "ts": 1700000000.3
+    },
+    {
+      "type": "token",
+      "ts": 1700000000.4,
+      "text": "Fascinating. ",
+      "seq": 4
+    },
+    {
+      "type": "token",
+      "ts": 1700000000.5,
+      "text": "I'll ",
+      "seq": 5
+    },
+    {
+      "type": "token",
+      "ts": 1700000000.6,
+      "text": "pretend ",
+      "seq": 6
+    },
+    {
+      "type": "state",
+      "value": "speaking",
+      "seq": 7,
+      "ts": 1700000000.7
+    },
+    {
+      "type": "token",
+      "ts": 1700000000.8,
+      "text": "I ",
+      "seq": 8
+    },
+    {
+      "type": "token",
+      "ts": 1700000000.9,
+      "text": "was ",
+      "seq": 9
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.0,
+      "text": "listening. ",
+      "seq": 10
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.1,
+      "text": "Try ",
+      "seq": 11
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.2,
+      "text": "typing ",
+      "seq": 12
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.3,
+      "text": "tool, ",
+      "seq": 13
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.4,
+      "text": "confirm, ",
+      "seq": 14
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.5,
+      "text": "code, ",
+      "seq": 15
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.6,
+      "text": "long, ",
+      "seq": 16
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.7,
+      "text": "tags, ",
+      "seq": 17
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.8,
+      "text": "error, ",
+      "seq": 18
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.9,
+      "text": "slow ",
+      "seq": 19
+    },
+    {
+      "type": "token",
+      "ts": 1700000002.0,
+      "text": "or ",
+      "seq": 20
+    },
+    {
+      "type": "token",
+      "ts": 1700000002.1,
+      "text": "voice.",
+      "seq": 21
+    },
+    {
+      "type": "reply_end",
+      "ts": 1700000002.2,
+      "seq": 22
+    },
+    {
+      "type": "latency",
+      "ts": 1700000002.3,
+      "first_token": 0.31,
+      "first_chunk_ready": 1.4,
+      "real_start": 1.9,
+      "first_chunk": "9w cut at 1.4s",
+      "held": 0.0,
+      "gaps": 0.0,
+      "filler": null,
+      "tools": [],
+      "seq": 23
+    },
+    {
+      "type": "state",
+      "value": "idle",
+      "seq": 24,
+      "ts": 1700000002.4
+    },
+    {
+      "type": "reset",
+      "ts": 1700000002.5,
+      "seq": 25
+    }
+  ]
+}

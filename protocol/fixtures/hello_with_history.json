@@ -1,0 +1,40 @@
+{
+  "description": "A new connection after one exchange: hello carries the history.",
+  "client_sent": [],
+  "server": [
+    {
+      "type": "hello",
+      "protocol": 1,
+      "name": "Sage",
+      "user": "Alex",
+      "device": "pc",
+      "local": true,
+      "busy": false,
+      "state": "idle",
+      "tools": [
+        "get_time",
+        "web_search",
+        "list_files",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "delete_file"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "text": "hello",
+          "source": null
+        },
+        {
+          "role": "assistant",
+          "text": "Fascinating. I'll pretend I was listening. Try typing tool, confirm, code, long, tags, error, slow or voice.",
+          "source": null
+        }
+      ],
+      "pending_confirm": null,
+      "seq": 1,
+      "ts": 1700000000.1
+    }
+  ]
+}

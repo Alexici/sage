@@ -1,0 +1,1 @@
+"""Sage: a local voice assistant (streaming LLM, CPU TTS, fillers, tools)."""

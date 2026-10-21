@@ -1,0 +1,193 @@
+{
+  "description": "Hold-to-talk on the local client: listening, transcribing, a voice user message, reply.",
+  "client_sent": [
+    {
+      "type": "talk_start"
+    },
+    {
+      "type": "talk_stop"
+    }
+  ],
+  "server": [
+    {
+      "type": "hello",
+      "protocol": 1,
+      "name": "Sage",
+      "user": "Alex",
+      "device": "pc",
+      "local": true,
+      "busy": false,
+      "state": "idle",
+      "tools": [
+        "get_time",
+        "web_search",
+        "list_files",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "delete_file"
+      ],
+      "history": [],
+      "pending_confirm": null,
+      "seq": 1,
+      "ts": 1700000000.1
+    },
+    {
+      "type": "state",
+      "value": "listening",
+      "seq": 2,
+      "ts": 1700000000.2
+    },
+    {
+      "type": "state",
+      "value": "transcribing",
+      "seq": 3,
+      "ts": 1700000000.3
+    },
+    {
+      "type": "user",
+      "ts": 1700000000.4,
+      "text": "Tell me something dry about Mondays.",
+      "source": "voice",
+      "seq": 4
+    },
+    {
+      "type": "state",
+      "value": "thinking",
+      "seq": 5,
+      "ts": 1700000000.5
+    },
+    {
+      "type": "token",
+      "ts": 1700000000.6,
+      "text": "Fascinating. ",
+      "seq": 6
+    },
+    {
+      "type": "token",
+      "ts": 1700000000.7,
+      "text": "I'll ",
+      "seq": 7
+    },
+    {
+      "type": "token",
+      "ts": 1700000000.8,
+      "text": "pretend ",
+      "seq": 8
+    },
+    {
+      "type": "state",
+      "value": "speaking",
+      "seq": 9,
+      "ts": 1700000000.9
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.0,
+      "text": "I ",
+      "seq": 10
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.1,
+      "text": "was ",
+      "seq": 11
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.2,
+      "text": "listening. ",
+      "seq": 12
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.3,
+      "text": "Try ",
+      "seq": 13
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.4,
+      "text": "typing ",
+      "seq": 14
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.5,
+      "text": "tool, ",
+      "seq": 15
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.6,
+      "text": "confirm, ",
+      "seq": 16
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.7,
+      "text": "code, ",
+      "seq": 17
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.8,
+      "text": "long, ",
+      "seq": 18
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.9,
+      "text": "tags, ",
+      "seq": 19
+    },
+    {
+      "type": "token",
+      "ts": 1700000002.0,
+      "text": "error, ",
+      "seq": 20
+    },
+    {
+      "type": "token",
+      "ts": 1700000002.1,
+      "text": "slow ",
+      "seq": 21
+    },
+    {
+      "type": "token",
+      "ts": 1700000002.2,
+      "text": "or ",
+      "seq": 22
+    },
+    {
+      "type": "token",
+      "ts": 1700000002.3,
+      "text": "voice.",
+      "seq": 23
+    },
+    {
+      "type": "reply_end",
+      "ts": 1700000002.4,
+      "seq": 24
+    },
+    {
+      "type": "latency",
+      "ts": 1700000002.5,
+      "first_token": 0.31,
+      "first_chunk_ready": 1.4,
+      "real_start": 1.9,
+      "first_chunk": "9w cut at 1.4s",
+      "held": 0.0,
+      "gaps": 0.0,
+      "filler": null,
+      "tools": [],
+      "seq": 25
+    },
+    {
+      "type": "state",
+      "value": "idle",
+      "seq": 26,
+      "ts": 1700000002.6
+    }
+  ]
+}

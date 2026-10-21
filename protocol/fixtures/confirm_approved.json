@@ -1,0 +1,193 @@
+{
+  "description": "A tool asks; the client answers yes; the tool runs.",
+  "client_sent": [
+    {
+      "type": "send",
+      "text": "confirm"
+    },
+    {
+      "type": "answer",
+      "id": "c0nf1rm1",
+      "approved": true
+    }
+  ],
+  "server": [
+    {
+      "type": "hello",
+      "protocol": 1,
+      "name": "Sage",
+      "user": "Alex",
+      "device": "pc",
+      "local": true,
+      "busy": false,
+      "state": "idle",
+      "tools": [
+        "get_time",
+        "web_search",
+        "list_files",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "delete_file"
+      ],
+      "history": [],
+      "pending_confirm": null,
+      "seq": 1,
+      "ts": 1700000000.1
+    },
+    {
+      "type": "user",
+      "ts": 1700000000.2,
+      "text": "confirm",
+      "source": "text",
+      "seq": 2
+    },
+    {
+      "type": "state",
+      "value": "thinking",
+      "seq": 3,
+      "ts": 1700000000.3
+    },
+    {
+      "type": "tool_start",
+      "ts": 1700000000.4,
+      "name": "write_file",
+      "arguments": "{\"path\": \"notes.txt\", \"content\": \"hello\"}",
+      "seq": 4
+    },
+    {
+      "type": "state",
+      "value": "awaiting_confirm",
+      "seq": 5,
+      "ts": 1700000000.5
+    },
+    {
+      "type": "confirm",
+      "ts": 1700000000.6,
+      "id": "c0nf1rm1",
+      "tool": "write_file",
+      "summary": "Create notes.txt (5 characters). Nothing real happens in the demo.",
+      "arguments": {
+        "path": "notes.txt",
+        "content": "hello"
+      },
+      "timeout": 30.0,
+      "seq": 6
+    },
+    {
+      "type": "confirm_done",
+      "ts": 1700000000.7,
+      "id": "c0nf1rm1",
+      "approved": true,
+      "reason": "answered",
+      "seq": 7
+    },
+    {
+      "type": "state",
+      "value": "thinking",
+      "seq": 8,
+      "ts": 1700000000.8
+    },
+    {
+      "type": "tool",
+      "ts": 1700000000.9,
+      "name": "write_file",
+      "arguments": "{}",
+      "chars": 24,
+      "seconds": 0.0,
+      "tier": "confirm",
+      "outcome": "ran",
+      "seq": 9
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.0,
+      "text": "Done. ",
+      "seq": 10
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.1,
+      "text": "It ",
+      "seq": 11
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.2,
+      "text": "didn't ",
+      "seq": 12
+    },
+    {
+      "type": "state",
+      "value": "speaking",
+      "seq": 13,
+      "ts": 1700000001.3
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.4,
+      "text": "actually ",
+      "seq": 14
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.5,
+      "text": "do ",
+      "seq": 15
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.6,
+      "text": "anything, ",
+      "seq": 16
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.7,
+      "text": "but ",
+      "seq": 17
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.8,
+      "text": "the ",
+      "seq": 18
+    },
+    {
+      "type": "token",
+      "ts": 1700000001.9,
+      "text": "thought ",
+      "seq": 19
+    },
+    {
+      "type": "token",
+      "ts": 1700000002.0,
+      "text": "counts.",
+      "seq": 20
+    },
+    {
+      "type": "reply_end",
+      "ts": 1700000002.1,
+      "seq": 21
+    },
+    {
+      "type": "latency",
+      "ts": 1700000002.2,
+      "first_token": 0.31,
+      "first_chunk_ready": 1.4,
+      "real_start": 1.9,
+      "first_chunk": "9w cut at 1.4s",
+      "held": 0.0,
+      "gaps": 0.0,
+      "filler": null,
+      "tools": [],
+      "seq": 22
+    },
+    {
+      "type": "state",
+      "value": "idle",
+      "seq": 23,
+      "ts": 1700000002.3
+    }
+  ]
+}
