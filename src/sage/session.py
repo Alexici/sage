@@ -15,7 +15,8 @@ MAX_RECORD_SECONDS = 60.0     # a talk button that is never released (a crashed 
 
 
 class Session:
-    def __init__(self, args, voice, toolbox, system: str, bus: EventBus | None = None, listener=None):
+    def __init__(self, args, voice, toolbox, system: str, bus: EventBus | None = None, listener=None,
+                 remote_listener=None):
         self.args = args
         self.voice = voice
         self.toolbox = toolbox
@@ -28,9 +29,14 @@ class Session:
         self.confirm_timeout = getattr(args, "confirm_timeout", 120.0)
         self.state_cb = None      # set by a client bridge (the server): called with "speaking", "listening", ...
         self.listener = listener  # speech input for a talk button (stt.listen.HoldToTalk), or None
+        self.remote_listener = remote_listener   # the same, fed by a network client's microphone (PushRecorder)
+        self._active = None       # the listener of the open recording
+        self._source = None       # "server" or "client" while recording
+        self._hf = False          # the wake-word listener is recording a request
         self._rec_lock = threading.Lock()
         self._recording = False
         self._rec_timer = None
+        self.wake_listener = None
         if hasattr(voice, "on_speech_start"):
             voice.on_speech_start = lambda: self.set_state("speaking")
 
@@ -58,21 +64,41 @@ class Session:
         return self.listener is not None
 
     @property
+    def mic_busy(self) -> bool:
+        """A microphone is open for a request: a talk button, a client's stream or the wake word."""
+        return self._recording or self._hf
+
+    @property
+    def can_talk_client(self) -> bool:
+        return self.remote_listener is not None
+
+    @property
     def recording(self) -> bool:
         return self._recording
 
-    def talk_start(self) -> bool:
-        """Opens the microphone. False if it cannot (no speech input, already recording, a reply in progress, or
-        the device failed: then the user is told with a notice)."""
+    @property
+    def recording_source(self) -> "str | None":
+        return self._source if self._recording else None
+
+    def feed_audio(self, data: bytes) -> None:
+        """Microphone audio from a network client (16 kHz s16le mono). Ignored unless a client recording is open."""
+        if self._recording and self._source == "client":
+            self._active.feed(data)
+
+    def talk_start(self, source: str = "server") -> bool:
+        """Opens the microphone (source "server": this machine's; "client": a client streams its own). False if it
+        cannot (no speech input, already recording, a reply in progress, or the device failed: then the user is told
+        with a notice)."""
+        listener = self.remote_listener if source == "client" else self.listener
         with self._rec_lock:
-            if self.listener is None or self._recording or self.busy:
+            if listener is None or self._recording or self._hf or self.busy:
                 return False
             try:
-                self.listener.start()
+                listener.start()
             except Exception as exc:   # noqa: BLE001 - a missing or busy microphone is a message, not a crash
                 self.bus.emit("notice", level="warn", message=f"could not open the microphone: {exc}")
                 return False
-            self._recording = True
+            self._recording, self._active, self._source = True, listener, source
             self._rec_timer = threading.Timer(MAX_RECORD_SECONDS, self._record_timeout)
             self._rec_timer.daemon = True
             self._rec_timer.start()
@@ -90,12 +116,50 @@ class Session:
                 self._rec_timer.cancel()
         self.set_state("transcribing")
         try:
-            text, note = self.listener.finish()
+            text, note = self._active.finish()
         except Exception as exc:   # noqa: BLE001
             text, note = None, f"speech recognition failed: {exc}"
         if note:
             self.bus.emit("notice", level="warn", message=note)
         return text
+
+    # ---- hands-free: the wake-word listener records by itself and hands over the finished audio
+    def hands_free_begin(self) -> bool:
+        with self._rec_lock:
+            if self.listener is None or self._recording or self._hf or self.busy:
+                return False
+            self._hf = True
+        self.set_state("listening")
+        return True
+
+    def hands_free_abort(self, note: "str | None" = None) -> None:
+        self._hf = False
+        if note:
+            self.bus.emit("notice", level="info", message=note)
+        self.set_state("idle")
+
+    def hands_free_finish(self) -> bool:
+        """Finishes an active hands-free recording immediately and transcribes what was said so far."""
+        if self._hf and self.wake_listener is not None:
+            self.wake_listener.finish_now()
+            return True
+        return False
+
+    def hands_free_turn(self, audio) -> None:
+        """Transcribes what the wake-word listener recorded and answers it like a spoken turn (blocks until the reply
+        has been spoken)."""
+        self.set_state("transcribing")
+        try:
+            text, note = self.listener.transcribe_audio(audio)
+        except Exception as exc:   # noqa: BLE001
+            text, note = None, f"speech recognition failed: {exc}"
+        finally:
+            self._hf = False
+        if note:
+            self.bus.emit("notice", level="warn", message=note)
+        if text:
+            self.send(text, "voice")
+        self.set_state("idle")
 
     def abort_talk(self, note: "str | None" = None) -> None:
         """Closes the microphone and drops the audio (Stop, the client went away, the recording ran too long)."""
@@ -106,7 +170,7 @@ class Session:
             if self._rec_timer:
                 self._rec_timer.cancel()
             try:
-                self.listener.abort()
+                self._active.abort()
             except Exception:   # noqa: BLE001
                 pass
         if note:
@@ -148,6 +212,8 @@ class Session:
                     slot["reason"] = "cancelled"
                     slot["event"].set()
         self.abort_talk()
+        if self._hf:
+            self.hands_free_abort()
         self.voice.cancel()
 
     # ---- tool confirmation: a tool asks, any client answers

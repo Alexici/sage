@@ -4,6 +4,7 @@ PushToTalk is for the terminal: a terminal cannot see a key being held down or r
 not work reliably on Wayland), so it is press Enter to start, press Enter to stop. HoldToTalk is for the app:
 the client sends "start" when the button goes down and "stop" when it comes up, and nothing here blocks.
 """
+import threading
 import time
 
 import numpy as np
@@ -39,6 +40,41 @@ class Recorder:
             self._stream.close()
             self._stream = None
         return np.concatenate(self._frames) if self._frames else np.zeros(0, dtype=np.float32)
+
+
+class PushRecorder:
+    """Same start()/stop() as Recorder, but the audio is pushed in by a network client (feed): little-endian signed
+    16-bit mono at 16 kHz, in frames of any size. Capped a little above the 60 s talk limit, so a client that never
+    stops cannot grow it without bound."""
+    MAX_SECONDS = 62
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._chunks, self._samples, self._carry, self._open = [], 0, b"", False
+
+    def start(self) -> None:
+        with self._lock:
+            self._chunks, self._samples, self._carry, self._open = [], 0, b"", True
+
+    def feed(self, data: bytes) -> None:
+        with self._lock:
+            if not self._open:
+                return
+            data = self._carry + bytes(data)
+            even = len(data) - len(data) % 2           # a frame may end in the middle of a sample
+            self._carry = data[even:]
+            room = self.MAX_SECONDS * SR - self._samples
+            if even == 0 or room <= 0:
+                return
+            pcm = np.frombuffer(data[:even], dtype="<i2")[:room]
+            self._chunks.append(pcm.astype(np.float32) / 32768.0)
+            self._samples += len(pcm)
+
+    def stop(self) -> np.ndarray:
+        with self._lock:
+            self._open = False
+            chunks, self._chunks, self._samples, self._carry = self._chunks, [], 0, b""
+        return np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.float32)
 
 
 def list_mics() -> str:
@@ -99,11 +135,18 @@ class HoldToTalk:
     def start(self) -> None:
         self.recorder.start()
 
+    def feed(self, data: bytes) -> None:
+        """Audio from a network client (only with a PushRecorder)."""
+        self.recorder.feed(data)
+
     def abort(self) -> None:
         self.recorder.stop()
 
     def finish(self) -> tuple:
-        audio = self.recorder.stop()
+        return self.transcribe_audio(self.recorder.stop())
+
+    def transcribe_audio(self, audio: np.ndarray) -> tuple:
+        """The same checks and transcription for audio that was recorded elsewhere (hands-free mode)."""
         problem = check_audio(audio)
         if problem:
             return None, problem

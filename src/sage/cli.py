@@ -47,7 +47,7 @@ import sys
 from pathlib import Path
 
 from sage import console   # first: sets TQDM_DISABLE before any TTS library loads
-from sage.audio import make_sink
+from sage.audio import RouterSink, make_sink
 from sage.chat import make_chunker
 from sage.fillers import FILLER_SETS, ensure_fillers
 from sage.paths import ROOT
@@ -200,7 +200,7 @@ def build_engine(args):
     backend = make_backend(args.backend, args.ref, args.voice, args.threads, args.pocket_quantize,
                            args.tts_device)
     voice_id = getattr(backend, "voice_id", "default")
-    sink = make_sink(backend.sr, args.no_audio)
+    sink = RouterSink(backend.sr, make_sink(backend.sr, args.no_audio))
 
     print("Preparing filler clips ...")
     voice = Voice(backend, sink, filler_pause=args.filler_pause, max_hold=args.max_hold,

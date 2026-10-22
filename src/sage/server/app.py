@@ -12,7 +12,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from sage.server.auth import Allowlist, DeviceStore, bearer_token, hash_token, is_loopback
 from sage.server.hub import Client, Hub
-from sage.server.protocol import PROTOCOL, ProtocolError, parse_client_message
+from sage.server.protocol import MAX_FRAME, PROTOCOL, ProtocolError, audio_info, parse_client_message
 
 REVOKE_CHECK_SECONDS = 15.0
 
@@ -82,7 +82,10 @@ async def _sender(ws: WebSocket, client: Client) -> None:
                 payload = await asyncio.wait_for(client.q.get(), 0.5)
             except asyncio.TimeoutError:
                 continue
-            await ws.send_text(payload)
+            if isinstance(payload, bytes):
+                await ws.send_bytes(payload)
+            else:
+                await ws.send_text(payload)
     except (WebSocketDisconnect, RuntimeError, asyncio.CancelledError):
         pass
 
@@ -101,9 +104,16 @@ async def _receive(ws: WebSocket, client: Client, hub: Hub, session) -> None:
         msg = await ws.receive()
         if msg["type"] == "websocket.disconnect":
             return
+        data = msg.get("bytes")
+        if data is not None:                    # microphone audio from the client that opened the recording
+            if len(data) > MAX_FRAME:
+                hub.error(client, "bad_request", "audio frame too large")
+            elif client is hub.mic_owner:
+                session.feed_audio(data)
+            continue
         raw = msg.get("text")
         if raw is None:
-            hub.error(client, "bad_request", "text frames only")
+            hub.error(client, "bad_request", "unsupported frame")
             continue
         try:
             kind, data = parse_client_message(raw)
@@ -126,17 +136,36 @@ async def _dispatch(kind: str, data: dict, client: Client, hub: Hub, session) ->
             await asyncio.to_thread(session.reset)
     elif kind == "answer":
         session.answer(data["id"], data["approved"])     # unknown, late or second answers are ignored
-    elif kind in ("talk_start", "talk_stop"):
-        if not client.local:
-            hub.error(client, "bad_request", "the microphone is on the server machine; only a client there may use it")
-        elif not session.can_talk:
+    elif kind == "audio_config":
+        if audio_info(session) is None:
+            hub.error(client, "unsupported", "this server has no audio output")
+        else:
+            hub.set_audio(client, data["playback"])
+    elif kind == "wake_config":
+            wl = getattr(session, "wake_listener", None)
+            if wl is None:
+                hub.direct(client, {"type": "wake", "enabled": False})
+                hub.direct(client, {"type": "notice", "level": "warn",
+                                    "message": "Start the server with --wake hey_jarvis (or --wake path/to/hey_sage.onnx) to enable wake word."})
+            else:
+                wl.set_enabled(data["enabled"])
+                hub._broadcast({"type": "wake", "enabled": wl.enabled, "phrase": getattr(wl, "label", "Hey Sage")})
+    elif kind == "talk_start":
+        source = data["source"]
+        if source == "server" and not client.local:
+            hub.error(client, "bad_request", "the server's microphone is on the server machine; send source "
+                                             "'client' and stream your own microphone")
+        elif (source == "server" and not session.can_talk) or (source == "client" and not session.can_talk_client):
             hub.error(client, "unsupported", "voice input is not available on this server (started without speech "
                                              "recognition, or faster-whisper is missing)")
-        elif kind == "talk_start":
-            if hub.turn_active or session.busy or session.recording:
-                hub.error(client, "busy", "a reply is still in progress" if not session.recording
-                          else "the microphone is already in use")
-            else:
-                await asyncio.to_thread(session.talk_start)       # a failure arrives as a notice
+        elif hub.turn_active or session.busy or session.mic_busy:
+            hub.error(client, "busy", "a reply is still in progress" if not session.mic_busy
+                      else "the microphone is already in use")
+        else:
+            ok = await asyncio.to_thread(session.talk_start, source)       # a failure arrives as a notice
+            hub.mic_owner = client if ok and source == "client" else None
+    elif kind == "talk_stop":
+        if session.recording_source == "server" and not client.local:
+            hub.error(client, "bad_request", "this recording is on the server's microphone")
         elif not hub.start_talk_stop():
             hub.error(client, "busy", "a reply is still in progress")

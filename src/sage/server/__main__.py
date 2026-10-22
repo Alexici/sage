@@ -73,6 +73,13 @@ def serve_main(argv: list) -> None:
     ap.add_argument("--devices-file", type=Path, default=DEVICES_FILE)
     ap.add_argument("--no-stt", action="store_true",
                     help="do not load speech recognition: the app's talk button is then unavailable")
+    ap.add_argument("--wake", metavar="MODEL", default=None,
+                    help="hands-free: a wake word model, a built-in name (hey_jarvis) or an .onnx file; the PC "
+                         "microphone listens while Sage is idle (needs speech recognition)")
+    ap.add_argument("--wake-threshold", type=float, default=0.5, help="score a frame needs to count (0..1)")
+    ap.add_argument("--wake-patience", type=int, default=2, help="frames in a row above the threshold (80 ms each)")
+    ap.add_argument("--follow-up", type=float, default=8.0,
+                    help="seconds after a reply in which speech needs no wake word (0 turns it off)")
     args = ap.parse_args(argv)
 
     try:
@@ -82,6 +89,7 @@ def serve_main(argv: list) -> None:
     host = args.host or ("0.0.0.0" if args.lan else "127.0.0.1")
     if args.host and args.lan:
         sys.exit("use either --host or --lan, not both")
+
 
     if args.demo:
         devices = DeviceStore(None)
@@ -102,7 +110,19 @@ def serve_main(argv: list) -> None:
             except Exception as exc:   # noqa: BLE001 - no faster-whisper or no model: text chat still works
                 print(f"Speech recognition is off ({exc}). Install it with: uv pip install faster-whisper "
                       "(or start with --no-stt to silence this).", file=sys.stderr)
-        session = Session(args, voice, toolbox, system, listener=listener)
+        remote = None
+        if listener is not None:        # the same Whisper, fed by a client's microphone instead of this machine's
+            from sage.stt.listen import HoldToTalk, PushRecorder
+            remote = HoldToTalk(PushRecorder(), listener.transcriber)
+        session = Session(args, voice, toolbox, system, listener=listener, remote_listener=remote)
+        if args.wake:
+                if listener is None:
+                    sys.exit("--wake needs speech recognition (install faster-whisper, and do not use --no-stt).")
+                from sage.stt.wake import OpenWakeWord, WakeListener
+                wl = WakeListener(session, OpenWakeWord(args.wake), args.wake_threshold, args.wake_patience,
+                                follow_up=args.follow_up, device=listener.recorder.device)
+                session.wake_listener = wl
+                wl.start()
         print(f"Devices: {', '.join(devices.names())}")
 
     app = create_app(session, devices, allow)

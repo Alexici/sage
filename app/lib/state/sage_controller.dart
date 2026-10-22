@@ -15,6 +15,7 @@ class SageController extends ChangeNotifier {
   static const String _kPrefShowSessionGuard = 'sage_show_session_guard';
   static const String _kPrefShowTools = 'sage_show_tools';
   static const String _kPrefTextScale = 'sage_text_scale';
+  static const String _kPrefWakeWord = 'sage_wake_word_enabled';
   static const int _kPttClickThresholdMs = 250;
 
   ChatState _state = const ChatState();
@@ -23,9 +24,10 @@ class SageController extends ChangeNotifier {
   AppTab _activeTab = AppTab.text;
   String _serverAddress = '127.0.0.1:8765';
   String _deviceToken = '';
-  bool _showTimings = false; // Disabled by default so avatar slice is centered
-  bool _showSessionGuard = false; // Disabled by default
+  bool _showTimings = false;
+  bool _showSessionGuard = false;
   bool _showToolDetails = true;
+  bool _wakeWordPreferred = false;
   int _textSizePercent = 100; // 90 to 130
   bool _shouldOpenSettings = false;
 
@@ -89,9 +91,11 @@ class SageController extends ChangeNotifier {
   bool get showTimings => _showTimings;
   bool get showSessionGuard => _showSessionGuard;
   bool get showToolDetails => _showToolDetails;
+  bool get wakeWordEnabled => _state.wakeEnabled;
   int get textSizePercent => _textSizePercent;
   double get textScale => (_textSizePercent.clamp(90, 130)) / 100.0;
-  bool get isHoldingTalk => _isRecordingVoice;
+  bool get isHoldingTalk =>
+      _isRecordingVoice || _state.activity == SageActivityState.listening;
   bool get isPttLatched => _isPttLatched;
 
   void setActiveTab(AppTab tab) {
@@ -113,6 +117,7 @@ class SageController extends ChangeNotifier {
     _showTimings = prefs.getBool(_kPrefShowTimings) ?? false;
     _showSessionGuard = prefs.getBool(_kPrefShowSessionGuard) ?? false;
     _showToolDetails = prefs.getBool(_kPrefShowTools) ?? true;
+    _wakeWordPreferred = prefs.getBool(_kPrefWakeWord) ?? false;
     _textSizePercent = (prefs.getInt(_kPrefTextScale) ?? 100).clamp(90, 130);
     notifyListeners();
     reconnect();
@@ -160,6 +165,19 @@ class SageController extends ChangeNotifier {
     }
   }
 
+  Future<void> toggleWakeWord() async {
+    if (!_state.canTalk || _state.connection != ConnectionStatus.connected) {
+      return;
+    }
+    final next = !_state.wakeEnabled;
+    _wakeWordPreferred = next;
+    _state = _state.copyWith(wakeEnabled: next);
+    _net.sendRaw(ClientFrames.wakeConfig(enabled: next));
+    _notifyImmediate();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kPrefWakeWord, next);
+  }
+
   void reconnect() {
     _state = _state.copyWith(clearConnectionError: true);
     _net.connect(address: _serverAddress, token: _deviceToken);
@@ -167,6 +185,18 @@ class SageController extends ChangeNotifier {
 
   void handleServerMessage(ServerMessage msg) {
     _state = apply(_state, msg);
+    if (msg is HelloMessage &&
+        _wakeWordPreferred &&
+        msg.canTalk &&
+        !msg.wakeEnabled) {
+      _state = _state.copyWith(wakeEnabled: true);
+      _net.sendRaw(ClientFrames.wakeConfig(enabled: true));
+    }
+    if (msg is StateMessage && msg.value != SageActivityState.listening) {
+      _isRecordingVoice = false;
+      _isPttLatched = false;
+      _micPressTime = null;
+    }
     if (msg is TokenMessage) {
       _scheduleCoalescedNotify();
     } else {
@@ -210,6 +240,9 @@ class SageController extends ChangeNotifier {
 
   void stopTurn() {
     if (_state.connection != ConnectionStatus.connected) return;
+    _isRecordingVoice = false;
+    _isPttLatched = false;
+    _micPressTime = null;
     _net.sendRaw(ClientFrames.cancel());
   }
 
@@ -235,15 +268,15 @@ class SageController extends ChangeNotifier {
   }
 
   /// Dual-function Mic button pointer down:
-  /// - If already latched in Push-to-Talk, clicking stops recording.
+  /// - If already listening (via latched PTT or Wake Word), clicking stops recording and transcribes immediately.
   /// - Otherwise starts recording and timestamps the press to distinguish Click vs Hold.
   void onMicPointerDown() {
-    if (!_state.isLocal ||
+    if (!_state.canTalk ||
         _state.connection != ConnectionStatus.connected ||
         _state.activeConfirm != null) {
       return;
     }
-    if (_isPttLatched) {
+    if (_isPttLatched || _state.activity == SageActivityState.listening) {
       _isPttLatched = false;
       _isRecordingVoice = false;
       _micPressTime = null;
@@ -276,10 +309,11 @@ class SageController extends ChangeNotifier {
   }
 
   void startTalking() {
-    if (!_state.isLocal ||
+    if (!_state.canTalk ||
         _state.connection != ConnectionStatus.connected ||
         _state.activeConfirm != null ||
-        _isRecordingVoice) {
+        _isRecordingVoice ||
+        _state.activity == SageActivityState.listening) {
       return;
     }
     _isRecordingVoice = true;
@@ -289,7 +323,9 @@ class SageController extends ChangeNotifier {
   }
 
   void stopTalking() {
-    if (!_isRecordingVoice) return;
+    if (!_isRecordingVoice && _state.activity != SageActivityState.listening) {
+      return;
+    }
     _isRecordingVoice = false;
     _isPttLatched = false;
     _micPressTime = null;

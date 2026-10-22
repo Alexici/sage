@@ -77,6 +77,9 @@ class Voice:
             self.speaking = self.holding = False
             self.inline_clip = None
             self.done.set()
+        flush = getattr(self.sink, "flush", None)
+        if flush:
+            flush()                 # network clients drop what they buffered
 
     def _drain(self):
         for q in (self.q_text, self.q_audio):

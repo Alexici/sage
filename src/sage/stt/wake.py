@@ -11,6 +11,7 @@ import queue
 import sys
 import threading
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -24,6 +25,7 @@ class OpenWakeWord:
     The score of a frame is the highest score among the loaded models (one, here)."""
 
     def __init__(self, model: str, vad_threshold: float = 0.0):
+        self.label = Path(model).stem if "/" in str(model) or str(model).endswith(".onnx") else str(model)
         try:
             from openwakeword.model import Model
         except ImportError as exc:
@@ -142,6 +144,9 @@ class WakeListener:
         self.noise = 0.0
         self._follow_until = 0.0
         self._was_busy = False
+        self.enabled = True
+        self.label = str( getattr(detector, "label", "Hey Sage") )
+        self._finish_early = threading.Event()
 
     # ---- lifecycle
     def start(self) -> None:
@@ -152,6 +157,15 @@ class WakeListener:
         self.stop_event.set()
         if self.thread:
             self.thread.join(timeout=3)
+
+    def set_enabled(self, on: bool) -> None:
+        self.enabled = bool(on)
+        if not self.enabled:
+            self._finish_early.set()
+
+    def finish_now(self) -> None:
+        """Called when the user clicks the mic button during hands-free listening to transcribe immediately."""
+        self._finish_early.set()
 
     def _callback(self, indata, _frames, _time, _status):
         block = np.asarray(indata)
@@ -208,6 +222,9 @@ class WakeListener:
             frame = self._next()
             if frame is None or len(frame) != FRAME:
                 continue
+            if not self.enabled:
+                pre.clear(); loud = 0
+                continue
             busy = self.session.busy or self.session.mic_busy
             if busy:                                    # deaf while Sage talks or another path holds the microphone
                 if not self._was_busy:
@@ -241,6 +258,7 @@ class WakeListener:
         self.triggers += 1
         self.log(how.replace("_", "-"))
         self.session.bus.emit("wake", source=how)
+        self._finish_early.clear()
         end = Endpointer(noise=self.noise)
         chunks = [f for f in preroll]
         for f in preroll:                               # the pre-roll already counts as speech heard
@@ -249,7 +267,10 @@ class WakeListener:
         if how == "wake":
             self._drain()                               # audio from before the word is not part of the request
         while result is None and not self.stop_event.is_set() and self.session.mic_busy:
-            frame = self._next(0.5)
+            if self._finish_early.is_set():
+                result = "done"
+                break
+            frame = self._next(0.2)
             if frame is None:
                 continue
             chunks.append(frame)

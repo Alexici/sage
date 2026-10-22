@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../protocol/messages.dart';
 import '../../state/chat_state.dart';
 import '../../state/sage_controller.dart';
 import '../../theme/sage_theme.dart';
@@ -18,10 +19,28 @@ class VoiceTab extends StatelessWidget {
     final state = controller.state;
     final recording = controller.isHoldingTalk;
     final latched = controller.isPttLatched;
+    final wakeActive = state.wakeEnabled;
+    final wakeTriggered =
+        state.activity == SageActivityState.listening && !latched;
     final canTalk =
-        state.isLocal &&
+        state.canTalk &&
         state.connection == ConnectionStatus.connected &&
         state.activeConfirm == null;
+
+    String bottomHint;
+    if (!state.canTalk) {
+      bottomHint = 'Voice input is not enabled on the server';
+    } else if (wakeTriggered) {
+      bottomHint = 'Listening... (Click mic to finish early, Esc to cancel)';
+    } else if (latched) {
+      bottomHint = 'Push-to-Talk active · Click to stop';
+    } else if (recording) {
+      bottomHint = 'Listening... release to send';
+    } else if (wakeActive) {
+      bottomHint = 'Say "${state.wakePhrase}"  ·  Or Click / Hold mic to talk';
+    } else {
+      bottomHint = 'Click: Push-to-Talk  ·  Hold: Hold-to-Talk';
+    }
 
     return Stack(
       children: [
@@ -36,7 +55,9 @@ class VoiceTab extends StatelessWidget {
                 state.stateLabel.toUpperCase(),
                 style: theme.monoLabel.copyWith(
                   letterSpacing: 2.2,
-                  color: recording ? SageColors.accent : SageColors.textMuted,
+                  color: (recording || wakeActive)
+                      ? SageColors.accent
+                      : SageColors.textMuted,
                 ),
               ),
             ],
@@ -57,30 +78,83 @@ class VoiceTab extends StatelessWidget {
             child: SessionGuardCard(state: state, theme: theme),
           ),
 
-        // 3. Bottom Translucent Round Dual-Function Microphone Button
+        // 3. Bottom Translucent Controls: Stop / Wake Word Toggle Pill / Round Mic Button
         Positioned(
-          bottom: 28,
+          bottom: 24,
           left: 0,
           right: 0,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (state.busy && !recording)
+              if (state.busy || recording)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
+                  padding: const EdgeInsets.only(bottom: 12),
                   child: FrostedCircleButton(
-                    size: 40,
+                    size: 38,
                     alpha: 145,
                     borderColor: SageColors.danger.withAlpha(180),
-                    tooltip: 'Stop reply (Esc)',
+                    tooltip: 'Cancel / Stop (Esc)',
                     onTap: controller.stopTurn,
                     child: const Icon(
-                      Icons.stop_rounded,
-                      size: 20,
+                      Icons.close_rounded,
+                      size: 18,
                       color: SageColors.danger,
                     ),
                   ),
                 ),
+
+              // Frosted Wake Word Toggle Pill ("Hey Sage")
+              Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: GestureDetector(
+                  onTap: canTalk ? controller.toggleWakeWord : null,
+                  child: MouseRegion(
+                    cursor: canTalk
+                        ? SystemMouseCursors.click
+                        : SystemMouseCursors.basic,
+                    child: FrostedBox(
+                      borderRadius: 18,
+                      alpha: wakeActive ? 175 : 120,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 6,
+                      ),
+                      borderColor: wakeActive
+                          ? SageColors.ok.withAlpha(180)
+                          : SageColors.border,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              color: wakeActive
+                                  ? SageColors.ok
+                                  : SageColors.textMuted,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            wakeActive
+                                ? 'Wake word: "${state.wakePhrase}" (On)'
+                                : 'Wake word: Off',
+                            style: theme.monoLabel.copyWith(
+                              fontSize: 11.5,
+                              color: wakeActive
+                                  ? SageColors.text
+                                  : SageColors.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // Translucent Round Dual-Function Microphone Button
               Listener(
                 onPointerDown: canTalk
                     ? (_) => controller.onMicPointerDown()
@@ -125,16 +199,7 @@ class VoiceTab extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              Text(
-                !state.isLocal
-                    ? 'Voice input requires local host mic'
-                    : (latched
-                          ? 'Push-to-Talk active · Click to stop'
-                          : (recording
-                                ? 'Listening... release to send'
-                                : 'Click: Push-to-Talk  ·  Hold: Hold-to-Talk')),
-                style: theme.label.copyWith(fontSize: 11.5),
-              ),
+              Text(bottomHint, style: theme.label.copyWith(fontSize: 11.5)),
             ],
           ),
         ),

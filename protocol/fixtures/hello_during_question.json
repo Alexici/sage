@@ -9,6 +9,13 @@
       "user": "Alex",
       "device": "pc",
       "local": true,
+      "can_talk": true,
+      "audio": {
+        "format": "pcm_s16le",
+        "rate": 24000,
+        "channels": 1,
+        "mic_rate": 16000
+      },
       "busy": true,
       "state": "awaiting_confirm",
       "tools": [

@@ -88,6 +88,9 @@ sealed class ServerMessage {
             useTimeoutLeft: true,
           );
         }
+        final isLocal = (json['local'] as bool?) ?? false;
+        final canTalk = (json['can_talk'] as bool?) ?? isLocal;
+        final rawAudio = json['audio'];
         return HelloMessage(
           seq: seq,
           ts: ts,
@@ -95,7 +98,11 @@ sealed class ServerMessage {
           name: (json['name'] as String?) ?? 'Sage',
           user: (json['user'] as String?) ?? 'Alex',
           device: (json['device'] as String?) ?? 'local',
-          local: (json['local'] as bool?) ?? false,
+          local: isLocal,
+          canTalk: canTalk,
+          wakeEnabled: (json['wake'] as bool?) ?? false,
+          wakePhrase: (json['wake_phrase'] as String?) ?? 'Hey Sage',
+          audio: rawAudio is Map<String, dynamic> ? rawAudio : null,
           busy: (json['busy'] as bool?) ?? false,
           state: SageActivityState.fromWire(json['state'] as String?),
           tools: rawTools.map((e) => e.toString()).toList(growable: false),
@@ -111,6 +118,15 @@ sealed class ServerMessage {
           seq: seq,
           ts: ts,
           value: SageActivityState.fromWire(json['value'] as String?),
+        );
+
+      case 'wake':
+        final hasSource = json['source'] is String;
+        return WakeStateMessage(
+          seq: seq,
+          ts: ts,
+          enabled: (json['enabled'] as bool?) ?? (hasSource ? true : false),
+          phrase: (json['phase'] as String?) ?? (json['model'] as String?),
         );
 
       case 'user':
@@ -182,6 +198,18 @@ sealed class ServerMessage {
           message: (json['message'] as String?) ?? '',
         );
 
+      case 'audio_start':
+        return AudioStartMessage(
+          seq: seq,
+          ts: ts,
+          format: (json['format'] as String?) ?? 'pcm_s16le',
+          rate: (json['rate'] as num?)?.toInt() ?? 24000,
+          channels: (json['channels'] as num?)?.toInt() ?? 1,
+        );
+
+      case 'audio_stop':
+        return AudioStopMessage(seq: seq, ts: ts);
+
       case 'latency':
         final rawTools = (json['tools'] as List<dynamic>?) ?? const [];
         return LatencyMessage(
@@ -222,6 +250,10 @@ class HelloMessage extends ServerMessage {
   final String user;
   final String device;
   final bool local;
+  final bool canTalk;
+  final bool wakeEnabled;
+  final String wakePhrase;
+  final Map<String, dynamic>? audio;
   final bool busy;
   final SageActivityState state;
   final List<String> tools;
@@ -236,12 +268,17 @@ class HelloMessage extends ServerMessage {
     required this.user,
     required this.device,
     required this.local,
+    bool? canTalk,
+    this.wakeEnabled = false,
+    this.wakePhrase = 'Hey Sage',
+    this.audio,
     required this.busy,
     required this.state,
     required this.tools,
     required this.history,
     this.pendingConfirm,
-  }) : super(type: 'hello');
+  }) : canTalk = canTalk ?? local,
+       super(type: 'hello');
 }
 
 class StateMessage extends ServerMessage {
@@ -252,6 +289,18 @@ class StateMessage extends ServerMessage {
     required super.ts,
     required this.value,
   }) : super(type: 'state');
+}
+
+class WakeStateMessage extends ServerMessage {
+  final bool enabled;
+  final String? phrase;
+
+  const WakeStateMessage({
+    required super.seq,
+    required super.ts,
+    required this.enabled,
+    this.phrase,
+  }) : super(type: 'wake');
 }
 
 class UserMessage extends ServerMessage {
@@ -404,6 +453,25 @@ class NoticeMessage extends ServerMessage {
   }) : super(type: 'notice');
 }
 
+class AudioStartMessage extends ServerMessage {
+  final String format;
+  final int rate;
+  final int channels;
+
+  const AudioStartMessage({
+    required super.seq,
+    required super.ts,
+    required this.format,
+    required this.rate,
+    required this.channels,
+  }) : super(type: 'audio_start');
+}
+
+class AudioStopMessage extends ServerMessage {
+  const AudioStopMessage({required super.seq, required super.ts})
+    : super(type: 'audio_stop');
+}
+
 class LatencyMessage extends ServerMessage {
   final double? firstToken;
   final double? firstChunkReady;
@@ -450,6 +518,11 @@ class ClientFrames {
   static String reset() => jsonEncode({'type': 'reset'});
   static String answer(String id, bool approved) =>
       jsonEncode({'type': 'answer', 'id': id, 'approved': approved});
-  static String talkStart() => jsonEncode({'type': 'talk_start'});
+  static String talkStart({String? source}) =>
+      jsonEncode({'type': 'talk_start', 'source': ?source});
   static String talkStop() => jsonEncode({'type': 'talk_stop'});
+  static String audioConfig({required bool playback}) =>
+      jsonEncode({'type': 'audio_config', 'playback': playback});
+  static String wakeConfig({required bool enabled}) =>
+      jsonEncode({'type': 'wake_config', 'enabled': enabled});
 }

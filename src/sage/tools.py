@@ -27,18 +27,22 @@ To add a tool: write a function that takes plain arguments and returns a short s
 entry in build_toolbox(). Return text that is easy to say aloud, and keep it short.
 """
 import datetime
+from dataclasses import dataclass
+from html.parser import HTMLParser
+import ipaddress
 import json
 import os
+from pathlib import Path
 import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable
+import urllib.parse
 
 MAX_RESULT_CHARS = 6000
 MAX_WRITE_CHARS = 200_000
@@ -163,6 +167,7 @@ def get_time() -> str:
     return now.strftime("%A, %d %B %Y, %H:%M (%Z, UTC%z)")
 
 
+# --------------------------------------------------------------------------- web tools
 def web_search(query: str, max_results: int = 5) -> str:
     try:
         from ddgs import DDGS
@@ -177,6 +182,154 @@ def web_search(query: str, max_results: int = 5) -> str:
         body = (r.get("body") or "").strip().replace("\n", " ")
         lines.append(f"- {r.get('title', '').strip()}: {body[:300]} ({r.get('href', '')})")
     return "\n".join(lines)
+
+
+class _HTMLTextExtractor(HTMLParser):
+    """Lightweight stdlib HTML-to-text extractor that drops scripts, styles, and nav chrome."""
+    _SKIP_TAGS = {"script", "style", "noscript", "svg", "head", "nav", "footer", "header", "aside"}
+    _BLOCK_TAGS = {"p", "div", "section", "article", "li", "h1", "h2", "h3", "h4", "pre", "tr", "br"}
+
+    def __init__(self):
+        super().__init__()
+        self._skip_depth = 0
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs):
+        t = tag.lower()
+        if t in self._SKIP_TAGS:
+            self._skip_depth += 1
+        elif self._skip_depth == 0 and t in self._BLOCK_TAGS:
+            self._parts.append("\n")
+
+    def handle_endtag(self, tag: str):
+        t = tag.lower()
+        if t in self._SKIP_TAGS and self._skip_depth > 0:
+            self._skip_depth -= 1
+        elif self._skip_depth == 0 and t in self._BLOCK_TAGS:
+            self._parts.append("\n")
+
+    def handle_data(self, data: str):
+        if self._skip_depth == 0:
+            cleaned = " ".join(data.split())
+            if cleaned:
+                self._parts.append(cleaned + " ")
+
+    def get_text(self) -> str:
+        raw = "".join(self._parts)
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        return "\n".join(lines)
+
+
+def _check_public_url(url: str) -> str:
+    """Validates that url is http/https and does not resolve to localhost or a private LAN IP."""
+    parsed = urllib.parse.urlparse(url.strip())
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("only http and https URLs are allowed (scheme not allowed)")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("missing hostname in URL")
+    if host.lower() in ("localhost", "localhost.localdomain") or host.lower().endswith(".local"):
+        raise ValueError("local network URLs are not allowed")
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as exc:
+        raise ValueError(f"could not resolve {host}: {exc}") from exc
+    for info in infos:
+        ip_str = info[4][0]
+        ip = ipaddress.ip_address(ip_str)
+        if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+            raise ValueError("accessing private or loopback IP addresses is not allowed")
+    return url.strip()
+
+
+def read_webpage(url: str, max_chars: int = 4000) -> str:
+    import requests
+
+    try:
+        safe_url = _check_public_url(url)
+    except ValueError as exc:
+        return f"Error: {exc}."
+    max_chars = max(500, min(int(max_chars), MAX_RESULT_CHARS))
+    headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) SageAssistant/1.0"}
+    try:
+        with requests.get(safe_url, headers=headers, timeout=10, stream=True) as r:
+            if r.status_code != 200:
+                return f"Error: server returned HTTP {r.status_code}."
+            ctype = (r.headers.get("Content-Type") or "").lower()
+            if "html" not in ctype and "text/" not in ctype and "json" not in ctype and "xml" not in ctype:
+                return f"Error: unsupported content type ({ctype or 'binary'})."
+            chunks, size = [], 0
+            for chunk in r.iter_content(chunk_size=16384):
+                chunks.append(chunk)
+                size += len(chunk)
+                if size >= 524_288:         # Download capped at 512 KB
+                    break
+            html = b"".join(chunks).decode(r.encoding or "utf-8", errors="replace")
+    except requests.RequestException as exc:
+        return f"Error: could not fetch webpage: {exc}"
+
+    if "html" not in ctype:
+        text = html.strip()
+    else:
+        parser = _HTMLTextExtractor()
+        parser.feed(html)
+        text = parser.get_text()
+    if not text:
+        return "No readable text found on that page."
+    return text[:max_chars] + ("\n[page cut]" if len(text) > max_chars else "")
+
+
+# --------------------------------------------------------------------------- clipboard tools
+def get_clipboard(max_chars: int = 4000) -> str:
+    max_chars = max(100, min(int(max_chars), MAX_RESULT_CHARS))
+    if shutil.which("wl-paste"):
+        cmd = ["wl-paste", "--no-newline"]
+    elif shutil.which("xclip"):
+        cmd = ["xclip", "-selection", "clipboard", "-o"]
+    else:
+        return "Error: no clipboard utility found. Install wl-clipboard (sudo pacman -S wl-clipboard)."
+    try:
+        res = subprocess.run(cmd, capture_output=True, timeout=3, check=False)
+    except subprocess.TimeoutExpired:
+        return "Error: reading the clipboard timed out."
+    except OSError as exc:
+        return f"Error: could not read clipboard: {exc}"
+    if res.returncode != 0:
+        err = res.stderr.decode("utf-8", errors="replace").strip().lower()
+        if "nothing is copied" in err or not res.stdout:
+            return "The clipboard is empty."
+        return f"Error: clipboard read failed ({err or res.returncode})."
+    if b"\x00" in res.stdout[:4096]:
+        return "Error: the clipboard currently holds binary data (such as an image), not text."
+    text = res.stdout.decode("utf-8", errors="replace")
+    if not text.strip():
+        return "The clipboard is empty."
+    return text[:max_chars] + ("\n[clipboard cut]" if len(text) > max_chars else "")
+
+
+def set_clipboard(text: str) -> str:
+    if not text:
+        return "Error: text to copy must not be empty."
+    if len(text) > MAX_WRITE_CHARS:
+        return f"Error: text is too long for the clipboard (limit {MAX_WRITE_CHARS} characters)."
+    if shutil.which("wl-copy"):
+        cmd = ["wl-copy", "--"]
+    elif shutil.which("xclip"):
+        cmd = ["xclip", "-selection", "clipboard", "-i"]
+    else:
+        return "Error: no clipboard utility found. Install wl-clipboard (sudo pacman -S wl-clipboard)."
+    try:
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        _, stderr = proc.communicate(input=text.encode("utf-8"), timeout=3)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return "Error: copying to the clipboard timed out."
+    except OSError as exc:
+        return f"Error: could not write to clipboard: {exc}"
+    if proc.returncode != 0:
+        err = stderr.decode("utf-8", errors="replace").strip()
+        return f"Error: clipboard write failed ({err or proc.returncode})."
+    return f"Copied {len(text)} characters to the clipboard."
 
 
 # --------------------------------------------------------------------------- file tools
@@ -498,7 +651,10 @@ def ask_coder(task: str) -> str:
     return "The coder model is not connected yet, so I could not run this. Tell the user it is not available yet."
 
 
-DEFAULT_TOOLS = "get_time,web_search,list_files,read_file,write_file,edit_file,delete_file"
+DEFAULT_TOOLS = (
+    "get_time,web_search,read_webpage,get_clipboard,set_clipboard,"
+    "list_files,read_file,write_file,edit_file,delete_file"
+)
 
 
 def build_toolbox(enabled: str, files_root: Path) -> Toolbox:
@@ -516,6 +672,25 @@ def build_toolbox(enabled: str, files_root: Path) -> Toolbox:
               "required": ["query"]}, web_search, "search", ask_when_tainted=True,
              describe=lambda kw: (f"Search the web for \"{_clip(str(kw.get('query', '')), 120)}\". This chat has read "
                                   f"your files or run commands, so check the search holds nothing private.")),
+        Tool("read_webpage",
+             "Fetch a web page URL and read its plain text content. Use this when web_search snippets are not enough.",
+             {"type": "object",
+              "properties": {"url": {"type": "string", "description": "the http or https URL to read"},
+                             "max_chars": {"type": "integer", "description": "default 4000"}},
+              "required": ["url"]}, read_webpage, "search", taints=True, ask_when_tainted=True,
+             describe=lambda kw: (f"Open web page \"{_clip(str(kw.get('url', '')), 120)}\". This chat has read "
+                                  f"your files or run commands, so check the URL holds nothing private.")),
+        Tool("get_clipboard",
+             "Read the current text from the user's system clipboard.",
+             {"type": "object",
+              "properties": {"max_chars": {"type": "integer", "description": "default 4000"}}},
+             get_clipboard, "system", taints=True),
+        Tool("set_clipboard",
+             "Copy text into the user's system clipboard.",
+             {"type": "object",
+              "properties": {"text": {"type": "string", "description": "the text to copy"}},
+              "required": ["text"]},
+             set_clipboard, "system"),
         *file_tools.values(),
         make_terminal_tool(files_root),
         Tool("ask_coder", "Hand a programming task to the coding model. (Placeholder: not connected yet.)",

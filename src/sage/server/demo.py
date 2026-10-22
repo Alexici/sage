@@ -6,14 +6,20 @@ language model and the voice replaced by a script. Type a keyword to see a situa
   tool     a tool call            confirm  a confirmation (it does nothing real)    code   a code block
   long     a long reply           tags     voice tags                               error  a failed turn
   slow     a 5 s thinking pause   voice    acts out a spoken turn (also: hold-to-talk on the local client)
+  sound    a test tone as audio frames (ask for playback with audio_config first); talk_start with source
+           'client' counts your microphone frames and answers as if you had said something
 
 Anything else gets a short canned reply."""
 import itertools
+import math
 import re
 import threading
 import time
 from types import SimpleNamespace
 
+import numpy as np
+
+from sage.audio import NullSink, RouterSink
 from sage.session import Session
 from sage.tools import CONFIRM, Tool, Toolbox
 
@@ -35,6 +41,7 @@ class DemoVoice:
     """Just the part of Voice that Session uses: a generation counter that Stop bumps."""
     def __init__(self):
         self.gen = 0
+        self.sink = RouterSink(24000, NullSink(24000))      # so a client can try audio playback without a model
 
     def new_reply(self):
         self.gen += 1
@@ -42,6 +49,7 @@ class DemoVoice:
 
     def cancel(self):
         self.gen += 1
+        self.sink.flush()
 
 
 class _Stopped(Exception):
@@ -63,16 +71,31 @@ class DemoSession(Session):
         self.pace = pace                    # 0 makes every pause instant (tests)
         self._canned = itertools.cycle(CANNED)
         self._recording = False
+        self.tone_seconds = 1.5
+        self.fed_bytes = 0          # microphone bytes received from a client (what the tests look at)
 
     # ---- local hold-to-talk (the demo has no microphone: it plays a fixed spoken turn)
     @property
     def can_talk(self) -> bool:
         return True
 
-    def talk_start(self) -> bool:
-        if self._recording or self.busy:
+    @property
+    def can_talk_client(self) -> bool:
+        return True
+
+    def feed_audio(self, data: bytes) -> None:
+        if self._recording and self._source == "client":
+            self.fed_bytes += len(data)
+
+    def abort_talk(self, note=None) -> None:
+        if self._recording:
+            self._recording = False
+            self.set_state("idle")
+
+    def talk_start(self, source: str = "server") -> bool:
+        if self._recording or self._hf or self.busy:
             return False
-        self._recording = True
+        self._recording, self._source, self.fed_bytes = True, source, 0
         self.set_state("listening")
         return True
 
@@ -100,6 +123,16 @@ class DemoSession(Session):
             if i == 2:
                 self.set_state("speaking")
         return text
+
+    def _tone(self, gen: int) -> None:
+        """A rising sine sweep, 220 to 880 Hz, written to the sink in 0.1 s pieces like the real voice does."""
+        sr, n = 24000, int(24000 * self.tone_seconds)
+        t = np.arange(n) / sr
+        sweep = 0.3 * np.sin(2 * math.pi * (220 * t + (880 - 220) * t * t / (2 * self.tone_seconds)))
+        for i in range(0, n, 2400):
+            if self.voice.gen != gen:
+                raise _Stopped
+            self.voice.sink.write(sweep[i:i + 2400].astype(np.float32))
 
     def _tool(self, gen: int, name: str, arguments: str, chars: int = 412, seconds: float = 1.2, tier="auto") -> None:
         self.bus.emit("tool_start", name=name, arguments=arguments)
@@ -144,6 +177,9 @@ class DemoSession(Session):
             self.bus.emit("user", text=VOICE_TEXT, source="voice")
             self.set_state("thinking")
             self._sleep(0.6, gen)
+        elif "sound" in words:
+            reply = self._say("A test tone, rising. It is not music.", gen)
+            self._tone(gen)
         elif "tool" in words:
             self._tool(gen, "web_search", '{"query": "weather in Cluj"}')
             reply = self._say("Cold, as usual. Bring a coat, or don't, and learn something.", gen)

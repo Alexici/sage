@@ -119,6 +119,9 @@ class ChatState {
   final String userName;
   final String deviceName;
   final bool isLocal;
+  final bool canTalk;
+  final bool wakeEnabled;
+  final String wakePhrase;
   final bool busy;
   final SageActivityState activity;
   final String? activeToolName;
@@ -136,6 +139,9 @@ class ChatState {
     this.userName = 'Alex',
     this.deviceName = '',
     this.isLocal = false,
+    bool? canTalk,
+    this.wakeEnabled = false,
+    this.wakePhrase = 'Hey Sage',
     this.busy = false,
     this.activity = SageActivityState.offline,
     this.activeToolName,
@@ -146,7 +152,7 @@ class ChatState {
     this.notices = const [],
     this.connectionError,
     this.retainTypedInputOnBusy = false,
-  });
+  }) : canTalk = canTalk ?? isLocal;
 
   ConfirmMessage? get activeConfirm =>
       confirmQueue.isNotEmpty ? confirmQueue.first : null;
@@ -172,7 +178,7 @@ class ChatState {
     final s = effectiveCircleState;
     switch (s) {
       case SageActivityState.idle:
-        return 'idle';
+        return wakeEnabled ? 'listening for "$wakePhrase"' : 'idle';
       case SageActivityState.listening:
         return 'listening';
       case SageActivityState.transcribing:
@@ -204,6 +210,9 @@ class ChatState {
     String? userName,
     String? deviceName,
     bool? isLocal,
+    bool? canTalk,
+    bool? wakeEnabled,
+    String? wakePhrase,
     bool? busy,
     SageActivityState? activity,
     String? activeToolName,
@@ -224,6 +233,9 @@ class ChatState {
       userName: userName ?? this.userName,
       deviceName: deviceName ?? this.deviceName,
       isLocal: isLocal ?? this.isLocal,
+      canTalk: canTalk ?? this.canTalk,
+      wakeEnabled: wakeEnabled ?? this.wakeEnabled,
+      wakePhrase: wakePhrase ?? this.wakePhrase,
       busy: busy ?? this.busy,
       activity: activity ?? this.activity,
       activeToolName: clearActiveTool
@@ -289,6 +301,9 @@ ChatState apply(ChatState state, ServerMessage msg) {
         userName: msg.user,
         deviceName: msg.device,
         isLocal: msg.local,
+        canTalk: msg.canTalk,
+        wakeEnabled: msg.wakeEnabled,
+        wakePhrase: msg.wakePhrase,
         busy: msg.busy,
         activity: msg.state,
         enabledTools: msg.tools,
@@ -299,14 +314,21 @@ ChatState apply(ChatState state, ServerMessage msg) {
 
     case StateMessage():
       final isIdle = msg.value == SageActivityState.idle;
+      final isListening = msg.value == SageActivityState.listening;
       final entries = isIdle
           ? _finishStreamingTurn(state.entries)
           : state.entries;
       return state.copyWith(
         activity: msg.value,
-        busy: !isIdle,
+        busy: !isIdle && !isListening,
         clearActiveTool: isIdle || msg.value == SageActivityState.speaking,
         entries: entries,
+      );
+
+    case WakeStateMessage():
+      return state.copyWith(
+        wakeEnabled: msg.enabled,
+        wakePhrase: msg.phrase ?? state.wakePhrase,
       );
 
     case UserMessage():
@@ -474,6 +496,10 @@ ChatState apply(ChatState state, ServerMessage msg) {
           ),
         ],
       );
+
+    case AudioStartMessage():
+    case AudioStopMessage():
+      return state;
 
     case LatencyMessage():
       final updated = List<TranscriptEntry>.of(state.entries);
