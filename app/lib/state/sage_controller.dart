@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,6 +19,8 @@ class SageController extends ChangeNotifier {
   static const String _kPrefTextScale = 'sage_text_scale';
   static const String _kPrefWakeWord = 'sage_wake_word_enabled';
   static const int _kPttClickThresholdMs = 250;
+  static const Duration _kFollowUpDuration = Duration(seconds: 8);
+  static const Duration _kToastDuration = Duration(milliseconds: 3200);
 
   ChatState _state = const ChatState();
   late final SageNetClient _net;
@@ -35,11 +39,15 @@ class SageController extends ChangeNotifier {
   bool _isPttLatched = false;
   DateTime? _micPressTime;
   bool _frameScheduled = false;
+  bool _hadReplyInTurn = false;
+  Timer? _followUpTimer;
+  final Map<String, Timer> _toastTimers = {};
 
   SageController({bool autoConnect = true}) {
     _net = SageNetClient(
       onMessage: handleServerMessage,
       onConnecting: (reconnecting) {
+        _clearFollowUp();
         _state = _state.copyWith(
           connection: reconnecting
               ? ConnectionStatus.reconnecting
@@ -49,6 +57,7 @@ class SageController extends ChangeNotifier {
         _notifyImmediate();
       },
       onDisconnected: (reason, error) {
+        _clearFollowUp();
         if (reason == DisconnectReason.authFailed) {
           _state = _state.copyWith(
             connection: ConnectionStatus.authFailed,
@@ -171,7 +180,11 @@ class SageController extends ChangeNotifier {
     }
     final next = !_state.wakeEnabled;
     _wakeWordPreferred = next;
-    _state = _state.copyWith(wakeEnabled: next);
+    if (!next) _clearFollowUp();
+    _state = _state.copyWith(
+      wakeEnabled: next,
+      followUpActive: next ? _state.followUpActive : false,
+    );
     _net.sendRaw(ClientFrames.wakeConfig(enabled: next));
     _notifyImmediate();
     final prefs = await SharedPreferences.getInstance();
@@ -179,12 +192,26 @@ class SageController extends ChangeNotifier {
   }
 
   void reconnect() {
+    _clearFollowUp();
     _state = _state.copyWith(clearConnectionError: true);
     _net.connect(address: _serverAddress, token: _deviceToken);
   }
 
   void handleServerMessage(ServerMessage msg) {
+    final wasBusyOrSpeaking =
+        _state.busy ||
+        _state.activity == SageActivityState.speaking ||
+        _state.activity == SageActivityState.thinking;
+
+    if (msg is TokenMessage || msg is ReplyEndMessage) {
+      _hadReplyInTurn = true;
+    } else if (msg is StoppedMessage || msg is ErrorMessage) {
+      _hadReplyInTurn = false;
+      _clearFollowUp();
+    }
+
     _state = apply(_state, msg);
+
     if (msg is HelloMessage &&
         _wakeWordPreferred &&
         msg.canTalk &&
@@ -192,15 +219,68 @@ class SageController extends ChangeNotifier {
       _state = _state.copyWith(wakeEnabled: true);
       _net.sendRaw(ClientFrames.wakeConfig(enabled: true));
     }
-    if (msg is StateMessage && msg.value != SageActivityState.listening) {
-      _isRecordingVoice = false;
-      _isPttLatched = false;
-      _micPressTime = null;
+
+    if (msg is StateMessage) {
+      if (msg.value != SageActivityState.listening) {
+        _isRecordingVoice = false;
+        _isPttLatched = false;
+        _micPressTime = null;
+      }
+      if (msg.value == SageActivityState.idle) {
+        // If a real reply just finished and wake word is enabled, open the 8s follow-up window
+        if (_state.wakeEnabled && (wasBusyOrSpeaking || _hadReplyInTurn)) {
+          _startFollowUpWindow();
+        }
+        _hadReplyInTurn = false;
+      } else {
+        _clearFollowUp();
+      }
     }
+
+    // Auto-dismiss any newly added toast notices after 3.2 seconds
+    _syncToastTimers();
+
     if (msg is TokenMessage) {
       _scheduleCoalescedNotify();
     } else {
       _notifyImmediate();
+    }
+  }
+
+  void _startFollowUpWindow() {
+    _followUpTimer?.cancel();
+    _state = _state.copyWith(followUpActive: true);
+    _followUpTimer = Timer(_kFollowUpDuration, () {
+      _followUpTimer = null;
+      if (_state.followUpActive) {
+        _state = _state.copyWith(followUpActive: false);
+        _notifyImmediate();
+      }
+    });
+  }
+
+  void _clearFollowUp() {
+    _followUpTimer?.cancel();
+    _followUpTimer = null;
+    if (_state.followUpActive) {
+      _state = _state.copyWith(followUpActive: false);
+    }
+  }
+
+  void _syncToastTimers() {
+    final activeIds = _state.notices.map((n) => n.id).toSet();
+    for (final oldId in _toastTimers.keys.toList()) {
+      if (!activeIds.contains(oldId)) {
+        _toastTimers.remove(oldId)?.cancel();
+      }
+    }
+    for (final notice in _state.notices) {
+      _toastTimers.putIfAbsent(notice.id, () {
+        return Timer(_kToastDuration, () {
+          _toastTimers.remove(notice.id);
+          dismissNotice(notice.id);
+        });
+      });
     }
   }
 
@@ -231,6 +311,7 @@ class SageController extends ChangeNotifier {
     if (trimmed.isEmpty) return false;
     if (_state.connection != ConnectionStatus.connected) return false;
     if (_state.activeConfirm != null) return false;
+    _clearFollowUp();
     final clipped = trimmed.length > 4000
         ? trimmed.substring(0, 4000)
         : trimmed;
@@ -243,11 +324,13 @@ class SageController extends ChangeNotifier {
     _isRecordingVoice = false;
     _isPttLatched = false;
     _micPressTime = null;
+    _clearFollowUp();
     _net.sendRaw(ClientFrames.cancel());
   }
 
   void clearConversation() {
     if (_state.connection != ConnectionStatus.connected) return;
+    _clearFollowUp();
     _net.sendRaw(ClientFrames.reset());
   }
 
@@ -267,15 +350,13 @@ class SageController extends ChangeNotifier {
     _notifyImmediate();
   }
 
-  /// Dual-function Mic button pointer down:
-  /// - If already listening (via latched PTT or Wake Word), clicking stops recording and transcribes immediately.
-  /// - Otherwise starts recording and timestamps the press to distinguish Click vs Hold.
   void onMicPointerDown() {
     if (!_state.canTalk ||
         _state.connection != ConnectionStatus.connected ||
         _state.activeConfirm != null) {
       return;
     }
+    _clearFollowUp();
     if (_isPttLatched || _state.activity == SageActivityState.listening) {
       _isPttLatched = false;
       _isRecordingVoice = false;
@@ -292,9 +373,6 @@ class SageController extends ChangeNotifier {
     _notifyImmediate();
   }
 
-  /// Dual-function Mic button pointer up:
-  /// - Held < 250ms -> latches Push-to-Talk (stays recording until next click).
-  /// - Held >= 250ms -> finishes Hold-to-Talk (sends talk_stop immediately).
   void onMicPointerUp() {
     final pressedAt = _micPressTime;
     if (pressedAt == null) return;
@@ -316,6 +394,7 @@ class SageController extends ChangeNotifier {
         _state.activity == SageActivityState.listening) {
       return;
     }
+    _clearFollowUp();
     _isRecordingVoice = true;
     _isPttLatched = false;
     _net.sendRaw(ClientFrames.talkStart());
@@ -336,6 +415,7 @@ class SageController extends ChangeNotifier {
   }
 
   void dismissNotice(String id) {
+    _toastTimers.remove(id)?.cancel();
     _state = _state.copyWith(
       notices: _state.notices.where((n) => n.id != id).toList(),
     );
@@ -344,6 +424,11 @@ class SageController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _followUpTimer?.cancel();
+    for (final t in _toastTimers.values) {
+      t.cancel();
+    }
+    _toastTimers.clear();
     _net.dispose();
     super.dispose();
   }

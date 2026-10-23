@@ -26,6 +26,7 @@ class VoiceTab extends StatelessWidget {
         state.canTalk &&
         state.connection == ConnectionStatus.connected &&
         state.activeConfirm == null;
+    final followUp = state.followUpActive && wakeActive && !recording;
 
     String bottomHint;
     if (!state.canTalk) {
@@ -36,6 +37,8 @@ class VoiceTab extends StatelessWidget {
       bottomHint = 'Push-to-Talk active · Click to stop';
     } else if (recording) {
       bottomHint = 'Listening... release to send';
+    } else if (followUp) {
+      bottomHint = 'Follow-up Active';
     } else if (wakeActive) {
       bottomHint = 'Say "${state.wakePhrase}"  ·  Or Click / Hold mic to talk';
     } else {
@@ -55,9 +58,11 @@ class VoiceTab extends StatelessWidget {
                 state.stateLabel.toUpperCase(),
                 style: theme.monoLabel.copyWith(
                   letterSpacing: 2.2,
-                  color: (recording || wakeActive)
-                      ? SageColors.accent
-                      : SageColors.textMuted,
+                  color: followUp
+                      ? SageColors.ok
+                      : ((recording || wakeActive)
+                            ? SageColors.accent
+                            : SageColors.textMuted),
                 ),
               ),
             ],

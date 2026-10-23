@@ -7,11 +7,11 @@ hears its own name through the speakers. Measure a model before trusting it: `py
 """
 import argparse
 import collections
+from pathlib import Path
 import queue
 import sys
 import threading
 import time
-from pathlib import Path
 
 import numpy as np
 
@@ -25,7 +25,7 @@ class OpenWakeWord:
     The score of a frame is the highest score among the loaded models (one, here)."""
 
     def __init__(self, model: str, vad_threshold: float = 0.0):
-        self.label = Path(model).stem if "/" in str(model) or str(model).endswith(".onnx") else str(model)
+        self.label = Path(model).stem if ("/" in str(model) or str(model).endswith(".onnx")) else str(model)
         try:
             from openwakeword.model import Model
         except ImportError as exc:
@@ -102,7 +102,12 @@ class Endpointer:
         self.t = self.speech = self.silence = 0.0
 
     def is_speech(self, level: float) -> bool:
-        return level > max(self.floor, self.ratio * self.noise)
+        # Once speech has started, use a slightly softer hold threshold (70%) so quiet syllables,
+        # slow speech, or "uh/um" hesitations do not get misclassified as silence.
+        thresh = max(self.floor, self.ratio * self.noise)
+        if self.speech > 0:
+            thresh *= 0.7
+        return level > thresh
 
     def feed(self, frame: np.ndarray) -> "str | None":
         dt = len(frame) / SR
@@ -113,7 +118,9 @@ class Endpointer:
             self.silence = 0.0
         else:
             self.silence += dt
-            self.noise = 0.9 * self.noise + 0.1 * level if self.noise else level
+            # Do not let quiet syllables mid-sentence ratchet the room noise floor upward
+            if self.speech == 0 or not self.noise or level < self.noise:
+                self.noise = 0.9 * self.noise + 0.1 * level if self.noise else level
         if self.speech >= self.min_speech and self.silence >= self.silence_end:
             return "done"
         if self.speech < self.min_speech and self.t >= self.no_speech:
@@ -132,10 +139,12 @@ class WakeListener:
     PRE_ROLL = 6             # frames kept before a follow-up onset (0.5 s), so the first word is not cut
 
     def __init__(self, session, detector, threshold: float = 0.5, patience: int = 2, cooldown: float = 2.0,
-                 follow_up: float = 8.0, device=None, stream_factory=None, log=None):
+                 follow_up: float = 8.0, device=None, stream_factory=None, log=None,
+                 silence_end: float = 0.9, min_speech: float = 0.25, floor: float = 0.012, ratio: float = 3.0):
         self.session, self.detector = session, detector
         self.gate = WakeGate(threshold, patience, cooldown)
         self.follow_up, self.device, self.factory = follow_up, device, stream_factory
+        self.silence_end, self.min_speech, self.floor, self.ratio = silence_end, min_speech, floor, ratio
         self.log = log or (lambda m: print(f"[wake] {m}", file=sys.stderr))
         self.frames: queue.Queue = queue.Queue(maxsize=200)
         self.stop_event = threading.Event()
@@ -145,7 +154,7 @@ class WakeListener:
         self._follow_until = 0.0
         self._was_busy = False
         self.enabled = True
-        self.label = str( getattr(detector, "label", "Hey Sage") )
+        self.label = str(getattr(detector, "label", "Hey Sage"))
         self._finish_early = threading.Event()
 
     # ---- lifecycle
@@ -243,7 +252,7 @@ class WakeListener:
             if self.noise == 0.0 or level < 3 * self.noise:
                 self.noise = level if self.noise == 0.0 else 0.95 * self.noise + 0.05 * level
             pre.append(frame)
-            loud = loud + 1 if (in_follow and level > max(0.012, 3 * self.noise)) else 0
+            loud = loud + 1 if (in_follow and level > max(self.floor, self.ratio * self.noise)) else 0
             score = self.detector.process(frame)
             if self.gate.update(score):
                 self._handle("wake", [])
@@ -258,12 +267,13 @@ class WakeListener:
         self.triggers += 1
         self.log(how.replace("_", "-"))
         self.session.bus.emit("wake", source=how)
-        self._finish_early.clear()
-        end = Endpointer(noise=self.noise)
+        end = Endpointer(noise=self.noise, silence_end=self.silence_end, min_speech=self.min_speech,
+                         floor=self.floor, ratio=self.ratio)
         chunks = [f for f in preroll]
         for f in preroll:                               # the pre-roll already counts as speech heard
             end.feed(f.astype(np.float32) / 32768.0)
         result = None
+        self._finish_early.clear()
         if how == "wake":
             self._drain()                               # audio from before the word is not part of the request
         while result is None and not self.stop_event.is_set() and self.session.mic_busy:
@@ -357,7 +367,7 @@ def main(argv=None) -> None:
     ap.add_argument("--patience", type=int, default=2)
     ap.add_argument("--mic", default=None)
     ap.add_argument("--positives", nargs="*", default=[], help="WAV files (16 kHz mono) that contain the wake word")
-    ap.add_argument("--negatives", nargs="*", default=[], help="WAV files that do not (long ones: TV, talk, music)")
+    ap.add_argument("--negatives", nargs="*", default=[], help="WAV files that contain no wake word")
     a = ap.parse_args(argv)
     det = OpenWakeWord(a.model)
     if a.mode == "live":

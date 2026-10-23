@@ -78,6 +78,14 @@ def serve_main(argv: list) -> None:
                          "microphone listens while Sage is idle (needs speech recognition)")
     ap.add_argument("--wake-threshold", type=float, default=0.5, help="score a frame needs to count (0..1)")
     ap.add_argument("--wake-patience", type=int, default=2, help="frames in a row above the threshold (80 ms each)")
+    ap.add_argument("--wake-silence", type=float, default=2.0,
+                    help="seconds of silence before a wake-word request is considered finished (default 2.0)")
+    ap.add_argument("--wake-min-speech", type=float, default=0.6,
+                    help="minimum seconds of speech before a silence pause can end the request (default 0.6)")
+    ap.add_argument("--wake-floor", type=float, default=0.006,
+                    help="minimum RMS level to count as speech during wake-word capture (default 0.006)")
+    ap.add_argument("--wake-ratio", type=float, default=2.0,
+                    help="how many times louder than the room noise floor speech must be (default 2.0)")
     ap.add_argument("--follow-up", type=float, default=8.0,
                     help="seconds after a reply in which speech needs no wake word (0 turns it off)")
     args = ap.parse_args(argv)
@@ -89,7 +97,6 @@ def serve_main(argv: list) -> None:
     host = args.host or ("0.0.0.0" if args.lan else "127.0.0.1")
     if args.host and args.lan:
         sys.exit("use either --host or --lan, not both")
-
 
     if args.demo:
         devices = DeviceStore(None)
@@ -116,13 +123,23 @@ def serve_main(argv: list) -> None:
             remote = HoldToTalk(PushRecorder(), listener.transcriber)
         session = Session(args, voice, toolbox, system, listener=listener, remote_listener=remote)
         if args.wake:
-                if listener is None:
-                    sys.exit("--wake needs speech recognition (install faster-whisper, and do not use --no-stt).")
-                from sage.stt.wake import OpenWakeWord, WakeListener
-                wl = WakeListener(session, OpenWakeWord(args.wake), args.wake_threshold, args.wake_patience,
-                                follow_up=args.follow_up, device=listener.recorder.device)
-                session.wake_listener = wl
-                wl.start()
+            if listener is None:
+                sys.exit("--wake needs speech recognition (install faster-whisper, and do not use --no-stt).")
+            from sage.stt.wake import OpenWakeWord, WakeListener
+            wl = WakeListener(
+                session,
+                OpenWakeWord(args.wake),
+                args.wake_threshold,
+                args.wake_patience,
+                follow_up=args.follow_up,
+                device=listener.recorder.device,
+                silence_end=args.wake_silence,
+                min_speech=args.wake_min_speech,
+                floor=args.wake_floor,
+                ratio=args.wake_ratio,
+            )
+            session.wake_listener = wl
+            wl.start()
         print(f"Devices: {', '.join(devices.names())}")
 
     app = create_app(session, devices, allow)

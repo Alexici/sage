@@ -319,18 +319,25 @@ def set_clipboard(text: str) -> str:
     else:
         return "Error: no clipboard utility found. Install wl-clipboard (sudo pacman -S wl-clipboard)."
     try:
-        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        _, stderr = proc.communicate(input=text.encode("utf-8"), timeout=3)
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+             close_fds=True,
+        )
+        if proc.stdin is not None:
+            proc.stdin.write(text.encode("utf-8"))
+            proc.stdin.close()
+        proc.wait(timeout=3)
     except subprocess.TimeoutExpired:
         proc.kill()
         return "Error: copying to the clipboard timed out."
     except OSError as exc:
         return f"Error: could not write to clipboard: {exc}"
     if proc.returncode != 0:
-        err = stderr.decode("utf-8", errors="replace").strip()
-        return f"Error: clipboard write failed ({err or proc.returncode})."
+        return f"Error: clipboard write failed (exit code {proc.returncode})."
     return f"Copied {len(text)} characters to the clipboard."
-
 
 # --------------------------------------------------------------------------- file tools
 def _safe_path(root: Path, rel: str) -> Path:

@@ -122,6 +122,7 @@ class ChatState {
   final bool canTalk;
   final bool wakeEnabled;
   final String wakePhrase;
+  final bool followUpActive;
   final bool busy;
   final SageActivityState activity;
   final String? activeToolName;
@@ -142,6 +143,7 @@ class ChatState {
     bool? canTalk,
     this.wakeEnabled = false,
     this.wakePhrase = 'Hey Sage',
+    this.followUpActive = false,
     this.busy = false,
     this.activity = SageActivityState.offline,
     this.activeToolName,
@@ -178,7 +180,12 @@ class ChatState {
     final s = effectiveCircleState;
     switch (s) {
       case SageActivityState.idle:
-        return wakeEnabled ? 'listening for "$wakePhrase"' : 'idle';
+        if (wakeEnabled) {
+          return followUpActive
+              ? 'Follow-up active'
+              : 'Waiting for "$wakePhrase"';
+        }
+        return 'idle';
       case SageActivityState.listening:
         return 'listening';
       case SageActivityState.transcribing:
@@ -213,6 +220,7 @@ class ChatState {
     bool? canTalk,
     bool? wakeEnabled,
     String? wakePhrase,
+    bool? followUpActive,
     bool? busy,
     SageActivityState? activity,
     String? activeToolName,
@@ -236,6 +244,7 @@ class ChatState {
       canTalk: canTalk ?? this.canTalk,
       wakeEnabled: wakeEnabled ?? this.wakeEnabled,
       wakePhrase: wakePhrase ?? this.wakePhrase,
+      followUpActive: followUpActive ?? this.followUpActive,
       busy: busy ?? this.busy,
       activity: activity ?? this.activity,
       activeToolName: clearActiveTool
@@ -304,6 +313,7 @@ ChatState apply(ChatState state, ServerMessage msg) {
         canTalk: msg.canTalk,
         wakeEnabled: msg.wakeEnabled,
         wakePhrase: msg.wakePhrase,
+        followUpActive: false,
         busy: msg.busy,
         activity: msg.state,
         enabledTools: msg.tools,
@@ -321,6 +331,7 @@ ChatState apply(ChatState state, ServerMessage msg) {
       return state.copyWith(
         activity: msg.value,
         busy: !isIdle && !isListening,
+        followUpActive: isIdle ? state.followUpActive : false,
         clearActiveTool: isIdle || msg.value == SageActivityState.speaking,
         entries: entries,
       );
@@ -329,12 +340,14 @@ ChatState apply(ChatState state, ServerMessage msg) {
       return state.copyWith(
         wakeEnabled: msg.enabled,
         wakePhrase: msg.phrase ?? state.wakePhrase,
+        followUpActive: msg.enabled ? state.followUpActive : false,
       );
 
     case UserMessage():
       final closed = _finishStreamingTurn(state.entries);
       return state.copyWith(
         busy: true,
+        followUpActive: false,
         activity: state.activity == SageActivityState.offline
             ? SageActivityState.thinking
             : state.activity,
@@ -371,7 +384,11 @@ ChatState apply(ChatState state, ServerMessage msg) {
           ),
         );
       }
-      return state.copyWith(busy: true, entries: updated);
+      return state.copyWith(
+        busy: true,
+        followUpActive: false,
+        entries: updated,
+      );
 
     case ReplyEndMessage():
       return state.copyWith(entries: _finishStreamingTurn(state.entries));
@@ -450,6 +467,7 @@ ChatState apply(ChatState state, ServerMessage msg) {
       final closed = _finishStreamingTurn(state.entries);
       return state.copyWith(
         busy: false,
+        followUpActive: false,
         clearActiveTool: true,
         confirmQueue: const [],
         entries: [
@@ -465,19 +483,20 @@ ChatState apply(ChatState state, ServerMessage msg) {
       if (msg.code == 'busy') {
         return state.copyWith(
           retainTypedInputOnBusy: true,
-          notices: [
-            ...state.notices,
+          notices: _pushNotice(
+            state.notices,
             ToastNotice(
               id: 'busy_${msg.seq}',
               level: 'warn',
               message: msg.message,
             ),
-          ],
+          ),
         );
       }
       final closed = _finishStreamingTurn(state.entries);
       return state.copyWith(
         busy: false,
+        followUpActive: false,
         clearActiveTool: true,
         entries: [
           ...closed,
@@ -487,14 +506,14 @@ ChatState apply(ChatState state, ServerMessage msg) {
 
     case NoticeMessage():
       return state.copyWith(
-        notices: [
-          ...state.notices,
+        notices: _pushNotice(
+          state.notices,
           ToastNotice(
             id: 'notice_${msg.seq}',
             level: msg.level,
             message: msg.message,
           ),
-        ],
+        ),
       );
 
     case AudioStartMessage():
@@ -516,6 +535,7 @@ ChatState apply(ChatState state, ServerMessage msg) {
       return state.copyWith(
         entries: const [],
         confirmQueue: const [],
+        followUpActive: false,
         clearLastLatency: true,
         clearActiveTool: true,
         busy: false,
@@ -524,6 +544,16 @@ ChatState apply(ChatState state, ServerMessage msg) {
     case UnknownServerMessage():
       return state;
   }
+}
+
+/// Deduplicates identical toast messages and caps the stack at 2 so toasts never flood the window.
+List<ToastNotice> _pushNotice(List<ToastNotice> current, ToastNotice next) {
+  final filtered = current.where((n) => n.message != next.message).toList();
+  filtered.add(next);
+  if (filtered.length > 2) {
+    return filtered.sublist(filtered.length - 2);
+  }
+  return filtered;
 }
 
 List<TranscriptEntry> _finishStreamingTurn(List<TranscriptEntry> entries) {

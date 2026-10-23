@@ -190,12 +190,19 @@ class Hub:
         return True
 
     def start_talk_stop(self) -> bool:
+        """Ends the recording: transcribe on its own thread, then answer like a typed message. A stop without an
+        open recording (the start was refused, the user let go anyway) is ignored, not an error."""
         if getattr(self.session, "_hf", False):
             self.session.hands_free_finish()
             return True
         if not self.session.recording:
             return True
-    
+        if self.turn_active or self.session.busy:
+            return False
+        self.turn_active = True
+        threading.Thread(target=self._turn, args=(self._talk_turn,), daemon=True).start()
+        return True
+
     def _send_turn(self, text, source):
         self.session.send(text, source)
 
