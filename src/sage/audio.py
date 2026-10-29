@@ -13,7 +13,7 @@ class SoundSink:
         self.stream = sd.OutputStream(samplerate=sr, channels=1, dtype="float32")
         self.stream.start()
 
-    def write(self, a: np.ndarray):
+    def write(self, a: np.ndarray, alive=None):
         self.stream.write(np.ascontiguousarray(a.reshape(-1, 1)))
 
 
@@ -23,7 +23,7 @@ class NullSink:
     def __init__(self, sr: int):
         self.sr = sr
 
-    def write(self, a: np.ndarray):
+    def write(self, a: np.ndarray, alive=None):
         time.sleep(len(a) / self.sr)
 
 
@@ -60,7 +60,9 @@ class RouterSink:
         self._epoch = 0
         self._lock = threading.Lock()
 
-    def write(self, a: np.ndarray):
+    def write(self, a: np.ndarray, alive=None):
+        """`alive()` says whether the reply this chunk belongs to is still current. It is asked again on the hub's
+        thread, after any Stop: a chunk whose write() began just after a cancel must not become a stray blip."""
         hub = self.hub
         if hub is None or not hub.wants_audio():
             self.local.write(a)
@@ -74,9 +76,9 @@ class RouterSink:
             if epoch != self._epoch:
                 return                                # flushed while waiting: this chunk belongs to a dead reply
             time.sleep(0.01)
-        if epoch != self._epoch:
+        if epoch != self._epoch or (alive is not None and not alive()):
             return
-        hub.send_audio(to_pcm16(a), lambda: epoch == self._epoch)     # checked again on the hub's thread
+        hub.send_audio(to_pcm16(a), lambda: epoch == self._epoch and (alive is None or alive()))   # and again on the hub's thread
         with self._lock:
             self._ahead_until += len(a) / self.sr
 

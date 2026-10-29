@@ -132,7 +132,7 @@ class DemoSession(Session):
         for i in range(0, n, 2400):
             if self.voice.gen != gen:
                 raise _Stopped
-            self.voice.sink.write(sweep[i:i + 2400].astype(np.float32))
+            self.voice.sink.write(sweep[i:i + 2400].astype(np.float32), lambda: self.voice.gen == gen)
 
     def _tool(self, gen: int, name: str, arguments: str, chars: int = 412, seconds: float = 1.2, tier="auto") -> None:
         self.bus.emit("tool_start", name=name, arguments=arguments)

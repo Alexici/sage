@@ -237,22 +237,38 @@ def _check_public_url(url: str) -> str:
     for info in infos:
         ip_str = info[4][0]
         ip = ipaddress.ip_address(ip_str)
-        if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+        if not ip.is_global:      # loopback, LAN, link-local, shared (100.64/10), reserved: anything not on the internet
             raise ValueError("accessing private or loopback IP addresses is not allowed")
     return url.strip()
+
+
+MAX_REDIRECTS = 4
+
+
+def _get_public(url: str, headers: dict):
+    """GET that checks every hop: a public page may redirect to http://127.0.0.1:... or a LAN address, so redirects are
+    followed here, one at a time, each through _check_public_url (requests would follow them unchecked)."""
+    import requests
+
+    for _ in range(MAX_REDIRECTS + 1):
+        safe_url = _check_public_url(url)
+        r = requests.get(safe_url, headers=headers, timeout=10, stream=True, allow_redirects=False)
+        location = r.headers.get("Location")
+        if 300 <= r.status_code < 400 and location:
+            r.close()
+            url = urllib.parse.urljoin(safe_url, location)
+            continue
+        return r
+    raise ValueError("too many redirects")
 
 
 def read_webpage(url: str, max_chars: int = 4000) -> str:
     import requests
 
-    try:
-        safe_url = _check_public_url(url)
-    except ValueError as exc:
-        return f"Error: {exc}."
     max_chars = max(500, min(int(max_chars), MAX_RESULT_CHARS))
     headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) SageAssistant/1.0"}
     try:
-        with requests.get(safe_url, headers=headers, timeout=10, stream=True) as r:
+        with _get_public(url, headers) as r:
             if r.status_code != 200:
                 return f"Error: server returned HTTP {r.status_code}."
             ctype = (r.headers.get("Content-Type") or "").lower()
@@ -265,6 +281,8 @@ def read_webpage(url: str, max_chars: int = 4000) -> str:
                 if size >= 524_288:         # Download capped at 512 KB
                     break
             html = b"".join(chunks).decode(r.encoding or "utf-8", errors="replace")
+    except ValueError as exc:
+        return f"Error: {exc}."
     except requests.RequestException as exc:
         return f"Error: could not fetch webpage: {exc}"
 
@@ -697,7 +715,9 @@ def build_toolbox(enabled: str, files_root: Path) -> Toolbox:
              {"type": "object",
               "properties": {"text": {"type": "string", "description": "the text to copy"}},
               "required": ["text"]},
-             set_clipboard, "system"),
+             set_clipboard, "system", tier=CONFIRM,      # a page can talk the model into copying `curl ... | sh`
+             describe=lambda kw: (f"Copy {len(str(kw.get('text', '')))} characters to your clipboard, starting with: "
+                                  f"\"{_clip(str(kw.get('text', '')), 100)}\"")),
         *file_tools.values(),
         make_terminal_tool(files_root),
         Tool("ask_coder", "Hand a programming task to the coding model. (Placeholder: not connected yet.)",

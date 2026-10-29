@@ -306,7 +306,7 @@ class Voice:
                                 for i in range(0, len(clip), 2400):
                                     if gen != self.gen:
                                         break
-                                    self.sink.write(clip[i:i + 2400])
+                                    self.sink.write(clip[i:i + 2400], lambda g=gen: g == self.gen)
                                 pause_until = (time.monotonic()
                                                + self.pause_s * random.uniform(0.8, 1.2))
                                 while time.monotonic() < pause_until and gen == self.gen:
@@ -343,4 +343,4 @@ class Voice:
             for i in range(0, len(audio), 2400):
                 if gen != self.gen:
                     break
-                self.sink.write(audio[i:i + 2400])
+                self.sink.write(audio[i:i + 2400], lambda g=gen: g == self.gen)
