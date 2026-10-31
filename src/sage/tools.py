@@ -63,7 +63,10 @@ class Tool:
     classify: Callable[[dict], "str | tuple[str, str]"] | None = None   # per call: tier, or (tier, reason)
     describe: Callable[[dict], str] | None = None                       # the confirmation sentence
     taints: bool = False            # its output can hold private or untrusted text (files, command output)
-    ask_when_tainted: bool = False  # an outward channel: asks (instead of auto) once the chat is tainted
+    ask_when_tainted: bool = False          # an outward channel: asks (instead of auto) once the chat is tainted
+    label: str = ""         #short name for the settings page
+    blurb: str = ""         # one phrase for the prompt's tool summary
+    power: bool = False         # enabling it raises what Sage can do on the machine
 
 
 @dataclass
@@ -658,6 +661,20 @@ def ask_coder(task: str) -> str:
     return "The coder model is not connected yet, so I could not run this. Tell the user it is not available yet."
 
 
+TOOL_INFO = {
+    "get_time": ("Date and time", "check time and date", False),
+    "web_search": ("Web search", "search the web", False),
+    "read_webpage": ("Read web pages", "read a webpage", False),
+    "get_clipboard": ("Read clipboard", "read the clipboard", False),
+    "set_clipboard": ("Write clipboard", "copy text to the clipboard", False),
+    "list_files": ("List files", "list all the files in a directory", False),
+    "read_file": ("Read files", "read the contents of a file", False),
+    "write_file": ("Create files", "create files", False),
+    "edit_file": ("Edit files", "edit files", False),
+    "delete_file": ("Delete files", "delete files", False),
+    "run_command": ("Run commands", "run commands", True),
+}
+
 DEFAULT_TOOLS = (
     "get_time,web_search,read_webpage,get_clipboard,set_clipboard,"
     "list_files,read_file,write_file,edit_file,delete_file"
@@ -705,6 +722,9 @@ def build_toolbox(enabled: str, files_root: Path) -> Toolbox:
               "properties": {"task": {"type": "string", "description": "what to build or fix"}},
               "required": ["task"]}, ask_coder, "coder"),
     ]
+    for t in every:
+        if t.name in TOOL_INFO:
+            t.label, t.blurb, t.power = TOOL_INFO[t.name]
     names = {t.name for t in every}
     mode = enabled.strip().lower()
     if mode == "none":
@@ -715,3 +735,12 @@ def build_toolbox(enabled: str, files_root: Path) -> Toolbox:
     if unknown:
         raise SystemExit(f"Unknown tool(s): {', '.join(sorted(unknown))}. Available: {', '.join(t.name for t in every)}")
     return Toolbox([t for t in every if t.name in wanted])
+
+def tool_catalog(files_root: Path) -> list[dict]:
+    """Every tool the settings page can offer, with what it needs to show: label, tier badge, power flag, default."""
+    tools = build_toolbox("all", files_root).tools.values()
+    on = set(DEFAULT_TOOLS.split(","))
+    return [{"name": t.name, "label": t.label, "description": t.blurb[:1].upper() + t.blurb[1:],
+             "tier": "mixed" if (t.classify or t.ask_when_tainted) else t.tier,
+             "power": t.power, "default_on": t.name in on}
+            for t in tools if t.blurb]
